@@ -13,6 +13,8 @@ import { retry } from '../../utils/Common';
 import { Deprecations } from '../../utils/Deprecations';
 import { fetchAndProcessBlobFile, getAxiosWithTimeouts, isNetworkError } from '../../utils/HttpUtils';
 import { transformPackageUrl } from '../../providers/cdn/PackageUrlTransformer';
+import { fetchMergedPackageCatalog } from '../../r2mm/manager/FetchMergedPackageCatalog';
+import { usesHexiumCatalog } from '../../utils/RepositoryUrls';
 
 export interface CachedMod {
     tsMod: ThunderstoreMod | undefined;
@@ -36,7 +38,9 @@ type PackageListChunk = {full_name: string}[];
 export type PackageListIndex = {
     content: string[],
     hash: string,
-    isLatest: boolean
+    isLatest: boolean,
+    community?: string,
+    includeHexium?: boolean
 };
 
 function isPackageListChunk(value: unknown): value is PackageListChunk {
@@ -207,16 +211,19 @@ export const TsModsModule = {
          * Full update process of the mod list, to be used after
          * passing the splash screen.
          */
-        async syncPackageList({commit, dispatch, state, rootGetters}): Promise<void> {
+        async syncPackageList({commit, dispatch, state, rootGetters, rootState}): Promise<void> {
             if (state.isThunderstoreModListUpdateInProgress || rootGetters['download/activeDownloadCount'] > 0) {
                 return;
             }
 
+            const game = rootState.activeGame;
+            const sources = usesHexiumCatalog(game.internalFolderName) ? 'Thunderstore and Hexium' : 'Thunderstore';
             commit('startThunderstoreModListUpdate');
 
             try {
-                commit('setThunderstoreModListUpdateStatus', 'Checking for mod list updates from Thunderstore...');
+                commit('setThunderstoreModListUpdateStatus', `Checking for mod list updates from ${sources}...`);
                 const packageListIndex = await dispatch('fetchPackageListIndex');
+                if (rootState.activeGame !== game) return;
 
                 // If the package list is up to date, only update the timestamp. Otherwise,
                 // fetch the new one and store it into IndexedDB.
@@ -229,11 +236,13 @@ export const TsModsModule = {
                             packageListIndex,
                             progressCallback: (progress: number) => commit(
                                 'setThunderstoreModListUpdateStatus',
-                                `Loading latest mod list from Thunderstore: ${progress}%`
+                                `Loading latest mod list from ${sources}: ${progress}%`
                             ),
                         },
                     );
                 }
+
+                if (rootState.activeGame !== game) return;
 
                 // If the package list was up to date and the mod list is already loaded to
                 // Vuex, just update the timestamp. Otherwise, load the list from IndexedDB
@@ -258,7 +267,9 @@ export const TsModsModule = {
         },
 
         async fetchPackageListIndex({rootState}): Promise<PackageListIndex> {
-            const packageIndexUrl = transformPackageUrl(rootState.activeGame.thunderstoreUrl);
+            const game = rootState.activeGame;
+            const community = game.internalFolderName;
+            const packageIndexUrl = transformPackageUrl(game.thunderstoreUrl);
             const indexUrl = CdnProvider.addCdnQueryParameter(packageIndexUrl);
             const options = {attempts: 5, interval: 2000, throwLastErrorAsIs: true};
             const index = await retry(() => fetchAndProcessBlobFile(indexUrl, {computeHash: true}), options);
@@ -273,15 +284,34 @@ export const TsModsModule = {
                 throw new Error('Failed to compute hash for the chunk index');
             }
 
-            const community = rootState.activeGame.internalFolderName;
+            // A TS index hash cannot describe changes to Hexium. Always refresh both
+            // sources for Valheim, including when reusing an older single-source cache.
+            if (usesHexiumCatalog(community)) {
+                return {content: index.content, hash: `hexium-v1:${index.hash}`, isLatest: false, community, includeHexium: true};
+            }
             const isLatest = await PackageDb.isLatestPackageListIndex(community, index.hash);
             return {content: index.content, hash: index.hash, isLatest};
         },
 
         async fetchAndCachePackageListChunks(
-            {commit, dispatch, rootState},
+            {commit, dispatch, rootState, state},
             {packageListIndex, progressCallback}: {packageListIndex: PackageListIndex, progressCallback?: ProgressCallback},
         ): Promise<boolean> {
+            if (packageListIndex.includeHexium) {
+                const community = packageListIndex.community;
+                if (!community || !usesHexiumCatalog(community)) {
+                    throw new Error('Missing Valheim community for the combined catalog');
+                }
+                const game = rootState.activeGame;
+                if (game.internalFolderName !== community) return false;
+                const packages = await fetchMergedPackageCatalog(
+                    packageListIndex.content, new Set(state.exclusions), progressCallback
+                );
+                if (rootState.activeGame !== game) return false;
+                await PackageDb.replacePackageList(community, packages, packageListIndex.hash);
+                return true;
+            }
+
             const chunkCount = packageListIndex.content.length;
             let completed = 0;
             let successes = 0;
@@ -408,7 +438,9 @@ export const TsModsModule = {
         },
 
         async updateMods({commit, dispatch, rootState}) {
-            const modList = await PackageDb.getPackagesAsThunderstoreMods(rootState.activeGame.internalFolderName);
+            const game = rootState.activeGame;
+            const modList = await PackageDb.getPackagesAsThunderstoreMods(game.internalFolderName);
+            if (rootState.activeGame !== game) return;
             commit('setMods', modList);
             commit('updateDeprecated', modList);
             commit('clearModCache');

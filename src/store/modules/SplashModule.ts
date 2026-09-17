@@ -81,11 +81,12 @@ export const SplashModule = {
             }
         },
         async fetchPackageListIndex({commit, dispatch}): Promise<PackageListIndex | undefined> {
-             commit('setSplashText', 'Checking for mod list updates from Thunderstore');
+             commit('setSplashText', 'Checking for online mod list updates');
 
             try {
                 return await dispatch('tsMods/fetchPackageListIndex', null, {root: true});
             } catch (e) {
+                commit('tsMods/setThunderstoreModListUpdateError', e, {root: true});
                 console.error('SplashModule failed to fetch mod list index from API.', e);
                 return undefined;
             } finally {
@@ -124,7 +125,7 @@ export const SplashModule = {
                 return false;
             }
 
-            commit('setSplashText', 'Loading latest mod list from Thunderstore');
+            commit('setSplashText', 'Loading the latest online mod list');
 
             const progressCallback = async (progress: number) => {
                 commit('updateRequestItem', {
@@ -140,6 +141,7 @@ export const SplashModule = {
                     {root: true}
                 );
             } catch (e) {
+                commit('tsMods/setThunderstoreModListUpdateError', e, {root: true});
                 console.error('SplashModule failed to fetch mod list from API.', e);
                 return false;
             } finally {

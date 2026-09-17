@@ -209,6 +209,23 @@ export async function upsertPackageListChunk(community: string, packageChunk: an
     });
 }
 
+/**
+ * Atomically publish a complete catalog. Both sources are fetched and merged
+ * before this call, so an HTTP or validation failure never prunes cached mods.
+ * Existing keys, profile manifests and artifact cache paths are unchanged.
+ */
+export async function replacePackageList(community: string, packages: any[], hash: string) {
+    const newPackages: DexiePackage[] = packages.map(pkg => ({...pkg, community}));
+    const summaries = packages.map(pkg => toSummary(community, pkg));
+    await db.transaction('rw', db.packages, db.summaries, db.indexHashes, async () => {
+        await db.packages.where({community}).delete();
+        await db.summaries.where({community}).delete();
+        await db.packages.bulkPut(newPackages);
+        await db.summaries.bulkPut(summaries);
+        await db.indexHashes.put({community, hash, date_updated: new Date()});
+    });
+}
+
 export async function setLatestPackageListIndex(community: string, hash: string) {
     await db.indexHashes.put({community, hash, date_updated: new Date()});
 }

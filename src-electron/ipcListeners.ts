@@ -1,5 +1,4 @@
 import { ipcMain, dialog, App, BrowserWindow } from 'electron';
-import electronUpdater from 'electron-updater';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import path from 'path';
@@ -20,8 +19,8 @@ ipcMain.on('get-browser-window', () => {
 });
 
 ipcMain.on('update-app', () => {
-    if (process.env.FLATPAK_ID) return;
-    electronUpdater.autoUpdater.checkForUpdatesAndNotify();
+    // Upstream updates would replace this locally maintained Hexium build.
+    console.info('Automatic application updates are disabled in this local Hexium build.');
 });
 
 ipcMain.on('install-via-thunderstore', (installString) => {
