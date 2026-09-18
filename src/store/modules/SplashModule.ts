@@ -2,6 +2,8 @@ import RequestItem from '../../model/requests/RequestItem';
 import { ActionTree } from 'vuex';
 import { State as RootState } from "../../store";
 import type { PackageListIndex } from './TsModsModule';
+import { captureCatalogRefresh, isCurrentCatalogRefresh } from '../../r2mm/manager/CatalogRefresh';
+import type { CatalogRefresh } from '../../r2mm/manager/CatalogRefresh';
 
 export interface State {
     requests: RequestItem[];
@@ -63,49 +65,74 @@ export const SplashModule = {
 
             return item;
         },
-        async getThunderstoreMods({commit, dispatch}) {
+        async getThunderstoreMods({commit, dispatch, rootState}): Promise<boolean> {
             commit('tsMods/startThunderstoreModListUpdate', null, {root: true});
-            const hasPriorCache = await dispatch('doesGameHaveLocalCache');
-
-            if (!hasPriorCache) {
-                const packageListIndex = await dispatch('fetchPackageListIndex');
-                await dispatch('fetchPackageListChunksIfUpdated', packageListIndex);
-            }
-
-            await dispatch('triggerStoreModListUpdate');
-            commit('tsMods/finishThunderstoreModListUpdate', null, {root: true});
-
-            if (hasPriorCache) {
-                // We want this to trigger in the background to ensure that the user gets an up-to-date modlist as soon as possible.
-                dispatch('tsMods/syncPackageList', null, {root: true});
-            }
-        },
-        async fetchPackageListIndex({commit, dispatch}): Promise<PackageListIndex | undefined> {
-             commit('setSplashText', 'Checking for online mod list updates');
+            const request = captureCatalogRefresh(rootState);
+            const isCurrent = () => isCurrentCatalogRefresh(rootState, request);
+            let hasPriorCache = false;
 
             try {
-                return await dispatch('tsMods/fetchPackageListIndex', null, {root: true});
+                hasPriorCache = await dispatch('doesGameHaveLocalCache', request);
+                if (!isCurrent()) return false;
+
+                if (!hasPriorCache) {
+                    const packageListIndex = await dispatch('fetchPackageListIndex', request);
+                    if (!isCurrent()) return false;
+                    await dispatch('fetchPackageListChunksIfUpdated', packageListIndex);
+                    if (!isCurrent()) return false;
+                }
+
+                await dispatch('triggerStoreModListUpdate', request);
             } catch (e) {
-                commit('tsMods/setThunderstoreModListUpdateError', e, {root: true});
-                console.error('SplashModule failed to fetch mod list index from API.', e);
+                if (isCurrent()) {
+                    commit('tsMods/setThunderstoreModListUpdateError', e, {root: true});
+                }
+            } finally {
+                commit('tsMods/finishThunderstoreModListUpdate', request, {root: true});
+            }
+
+            if (!isCurrent()) return false;
+            if (hasPriorCache) {
+                // Show the cached list immediately, then refresh it without blocking startup.
+                dispatch('tsMods/syncPackageList', null, {root: true});
+            }
+            return true;
+        },
+        async fetchPackageListIndex({commit, dispatch, rootState}, request: CatalogRefresh): Promise<PackageListIndex | undefined> {
+            if (!isCurrentCatalogRefresh(rootState, request)) return undefined;
+            commit('setSplashText', 'Checking for online mod list updates');
+
+            try {
+                return await dispatch('tsMods/fetchPackageListIndex', request, {root: true});
+            } catch (e) {
+                if (isCurrentCatalogRefresh(rootState, request)) {
+                    commit('tsMods/setThunderstoreModListUpdateError', e, {root: true});
+                    console.error('SplashModule failed to fetch mod list index from API.', e);
+                }
                 return undefined;
             } finally {
-                commit('updateRequestItem', {
-                    requestName: 'PackageListIndex',
-                    value: 100
-                } as UpdateRequestItemBody);
+                if (isCurrentCatalogRefresh(rootState, request)) {
+                    commit('updateRequestItem', {
+                        requestName: 'PackageListIndex',
+                        value: 100
+                    } as UpdateRequestItemBody);
+                }
             }
         },
-        async doesGameHaveLocalCache({dispatch, commit}): Promise<boolean> {
+        async doesGameHaveLocalCache({dispatch, commit, rootState}, request: CatalogRefresh): Promise<boolean> {
+            if (!isCurrentCatalogRefresh(rootState, request)) return false;
             commit('setSplashText', 'Checking for mod list in local cache');
             let hasCache = false;
 
             try {
-                hasCache = await dispatch('tsMods/gameHasCachedModList', null, {root: true});
+                hasCache = await dispatch('tsMods/gameHasCachedModList', request, {root: true});
             } catch (e) {
-                console.error('SplashModule failed to check mod list in local cache', e);
+                if (isCurrentCatalogRefresh(rootState, request)) {
+                    console.error('SplashModule failed to check mod list in local cache', e);
+                }
             }
 
+            if (!isCurrentCatalogRefresh(rootState, request)) return false;
             if (hasCache) {
                 commit('updateRequestItem', {
                     requestName: 'PackageListIndex',
@@ -119,19 +146,19 @@ export const SplashModule = {
 
             return hasCache;
         },
-        async fetchPackageListChunksIfUpdated({ commit, dispatch }, packageListIndex?: PackageListIndex): Promise<boolean> {
-            // Skip loading chunks if loading index failed.
-            if (!packageListIndex) {
-                return false;
-            }
-
+        async fetchPackageListChunksIfUpdated({ commit, dispatch, rootState }, packageListIndex?: PackageListIndex): Promise<boolean> {
+            // Skip loading chunks if loading the index failed or this startup was superseded.
+            if (!packageListIndex || !isCurrentCatalogRefresh(rootState, packageListIndex.request)) return false;
+            const {request} = packageListIndex;
             commit('setSplashText', 'Loading the latest online mod list');
 
-            const progressCallback = async (progress: number) => {
-                commit('updateRequestItem', {
-                    requestName: 'PackageListChunks',
-                    value: progress
-                } as UpdateRequestItemBody);
+            const progressCallback = (progress: number) => {
+                if (isCurrentCatalogRefresh(rootState, request)) {
+                    commit('updateRequestItem', {
+                        requestName: 'PackageListChunks',
+                        value: progress
+                    } as UpdateRequestItemBody);
+                }
             };
 
             try {
@@ -141,25 +168,32 @@ export const SplashModule = {
                     {root: true}
                 );
             } catch (e) {
-                commit('tsMods/setThunderstoreModListUpdateError', e, {root: true});
-                console.error('SplashModule failed to fetch mod list from API.', e);
+                if (isCurrentCatalogRefresh(rootState, request)) {
+                    commit('tsMods/setThunderstoreModListUpdateError', e, {root: true});
+                    console.error('SplashModule failed to fetch mod list from API.', e);
+                }
                 return false;
             } finally {
-                await progressCallback(100);
+                progressCallback(100);
             }
         },
-        async triggerStoreModListUpdate({ commit, dispatch }): Promise<void> {
+        async triggerStoreModListUpdate({ commit, dispatch, rootState }, request: CatalogRefresh): Promise<void> {
+            if (!isCurrentCatalogRefresh(rootState, request)) return;
             commit('setSplashText', 'Processing the mod list');
 
             try {
-                await dispatch('tsMods/updateMods', null, {root: true});
+                await dispatch('tsMods/updateMods', request, {root: true});
             } catch (e) {
-                console.error('Updating the store mod list by SplashModule failed.', e);
+                if (isCurrentCatalogRefresh(rootState, request)) {
+                    console.error('Updating the store mod list by SplashModule failed.', e);
+                }
             } finally {
-                commit('updateRequestItem', {
-                    requestName: 'Vuex',
-                    value: 100
-                } as UpdateRequestItemBody);
+                if (isCurrentCatalogRefresh(rootState, request)) {
+                    commit('updateRequestItem', {
+                        requestName: 'Vuex',
+                        value: 100
+                    } as UpdateRequestItemBody);
+                }
             }
         }
     }

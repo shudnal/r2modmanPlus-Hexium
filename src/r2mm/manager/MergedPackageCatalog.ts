@@ -56,6 +56,14 @@ function nonNegativeNumber(value: unknown): number {
     return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
+function requiredFileSize(value: unknown, release: string, source: CatalogSource): number {
+    // A downloadable ZIP cannot be empty. Zero must not masquerade as a known size.
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+        throw new Error(`Invalid file_size for ${release} from ${source}: expected a positive integer byte count`);
+    }
+    return value;
+}
+
 function versionParts(version: string): number[] {
     const parts = version.split('.').map(Number);
     if (!/^\d+\.\d+\.\d+$/.test(version) || !parts.every(Number.isSafeInteger)) {
@@ -118,8 +126,7 @@ function normalizePackage(value: unknown, source: CatalogSource): CatalogPackage
             icon: typeof version.icon === 'string' ? version.icon : '',
             download_url: httpsUrl(version.download_url, `${fullName}-${number} download_url`),
             downloads: nonNegativeNumber(version.downloads),
-            // Hexium's supplied OpenAPI does not require file_size. Zero means unknown.
-            file_size: nonNegativeNumber(version.file_size),
+            file_size: requiredFileSize(version.file_size, `${fullName}-${number}`, source),
             is_active: true,
             date_created: typeof version.date_created === 'string' ? version.date_created : '',
         });

@@ -8,6 +8,7 @@ import ProfileModule, { State as ProfileState } from './modules/ProfileModule';
 import ProfileExportModule, { State as ProfileExportState } from './modules/ProfileExportModule';
 import { ProfilesModule, State as ProfilesState } from './modules/ProfilesModule';
 import { TsModsModule, State as TsModsState } from './modules/TsModsModule';
+import { invalidateCatalogRefresh } from '../r2mm/manager/CatalogRefresh';
 import { FolderMigration } from '../migrations/FolderMigration';
 import Game from '../model/game/Game';
 import GameManager from '../model/game/GameManager';
@@ -97,6 +98,8 @@ export const store = {
     },
     mutations: {
         setActiveGame(state: State, game: Game) {
+            // Invalidate synchronously, even when selecting the same reused Game instance.
+            invalidateCatalogRefresh(state.tsMods);
             state.activeGame = game;
         },
         setMigrationChecked(state: State) {

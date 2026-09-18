@@ -25,13 +25,39 @@ describe('merged Valheim catalog', () => {
 
     it('chooses the complete Hexium release record without borrowing dependencies or size', () => {
         const hex = listing('hex', ['1.0.0']);
-        delete (hex.versions[0] as {file_size?: number}).file_size;
+        hex.versions[0]!.file_size = 2048;
         hex.versions[0]!.dependencies = ['HexOnly-Library-3.0.0'];
         const [pkg] = mergePackageCatalogs([listing('ts', ['1.0.0'])], [hex]);
         expect(pkg!.versions[0]!.dependencies).toEqual(['HexOnly-Library-3.0.0']);
-        expect(pkg!.versions[0]!.file_size).toBe(0);
+        expect(pkg!.versions[0]!.file_size).toBe(2048);
         expect(pkg!.versions[0]!.download_url).toContain('hexium.gg');
         expect(pkg!.package_url).toContain('hexium.gg');
+    });
+
+    it.each([undefined, null, '100', '', false, 0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+        'rejects invalid file_size %s with source and release context', value => {
+            for (const source of ['ts', 'hex'] as const) {
+                const bad = listing(source, ['1.0.0']);
+                (bad.versions[0] as Record<string, unknown>).file_size = value;
+                const merge = () => source === 'hex'
+                    ? mergePackageCatalogs([listing('ts', ['1.0.0'])], [bad])
+                    : mergePackageCatalogs([bad], []);
+                expect(merge).toThrow(`Invalid file_size for Team-Mod-1.0.0 from ${source === 'hex' ? 'hexium' : 'thunderstore'}`);
+            }
+        }
+    );
+
+    it('rejects a missing size instead of substituting zero or the other source size', () => {
+        const hex = listing('hex', ['1.0.0']);
+        delete (hex.versions[0] as {file_size?: number}).file_size;
+        expect(() => mergePackageCatalogs([listing('ts', ['1.0.0'])], [hex])).toThrow('file_size');
+    });
+
+    it('does not require a size for a withdrawn release', () => {
+        const hex = listing('hex', ['2.0.0', '1.0.0']);
+        hex.versions[0]!.is_active = false;
+        delete (hex.versions[0] as {file_size?: number}).file_size;
+        expect(mergePackageCatalogs([], [hex])[0]!.versions.map(v => v.version_number)).toEqual(['1.0.0']);
     });
 
     it('preserves categories needed for exact modpack dependencies', () => {

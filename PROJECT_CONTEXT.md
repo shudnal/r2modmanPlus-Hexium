@@ -18,6 +18,10 @@ This fork is maintained for local use, initially for Valheim only. Work against
 - Do not add accounts, publishing, source selection, Hexium deep links, or
   per-source offline recovery. Both repositories are expected to be available.
 - A failed combined refresh must not publish an incomplete replacement catalog.
+- Require valid positive `file_size` values for active releases; do not replace
+  missing sizes with zero or introduce an unknown-size progress mode.
+- Catalog startup, refresh and reset operations must own a generation. Invalidate
+  old work on game selection and check ownership before writes and UI updates.
 - Do not allow automatic upstream application updates to overwrite this build.
 
 All project code, comments, documentation and review messages must be in English.

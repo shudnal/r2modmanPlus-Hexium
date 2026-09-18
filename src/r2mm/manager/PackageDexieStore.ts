@@ -40,6 +40,10 @@ class PackageDexieStore extends Dexie {
 
 const db = new PackageDexieStore();
 
+// A throwing guard aborts obsolete transactions without coupling this store to Vuex.
+type CatalogWriteGuard = () => void;
+const noCatalogGuard: CatalogWriteGuard = () => {};
+
 function toSummary(community: string, pkg: any): DexieSummary {
     return {
         community,
@@ -62,20 +66,27 @@ function toSummary(community: string, pkg: any): DexieSummary {
     };
 }
 
-async function rebuildSummaries(community: string): Promise<DexieSummary[]> {
+async function rebuildSummaries(community: string, check: CatalogWriteGuard): Promise<DexieSummary[]> {
+    check();
     return await db.transaction('rw', db.packages, db.summaries, async () => {
+        check();
         const pkgs = await db.packages.where({community}).toArray();
+        check();
         const summaries = pkgs.map((p) => toSummary(community, p));
         await db.summaries.bulkPut(summaries);
+        check();
         return summaries;
     });
 }
 
-export async function getPackagesAsThunderstoreMods(community: string) {
+export async function getPackagesAsThunderstoreMods(community: string, check: CatalogWriteGuard = noCatalogGuard) {
+    check();
     let summaries = await db.summaries.where({community}).toArray();
+    check();
 
     if (summaries.length === 0) {
-        summaries = await rebuildSummaries(community);
+        summaries = await rebuildSummaries(community, check);
+        check();
     }
 
     return summaries.map(ThunderstoreMod.parseFromSummary)
@@ -182,30 +193,45 @@ export function selectPackageIdsToPrune(
     return storedKeys.filter(([, fullName]) => !fetchedFullNames.has(fullName));
 }
 
-export async function pruneRemovedMods(community: string, fetchedFullNames: Set<string>) {
+export async function pruneRemovedMods(community: string, fetchedFullNames: Set<string>, check: CatalogWriteGuard = noCatalogGuard) {
+    check();
     await db.transaction('rw', db.packages, db.summaries, async () => {
+        check();
         const storedKeys = await db.packages.where({community}).primaryKeys();
+        check();
         const toDelete = selectPackageIdsToPrune(storedKeys, fetchedFullNames);
         await db.packages.bulkDelete(toDelete);
+        check();
         await db.summaries.bulkDelete(toDelete);
+        check();
     });
 }
 
-export async function resetCommunity(community: string) {
+export async function resetCommunity(community: string, check: CatalogWriteGuard = noCatalogGuard) {
+    check();
     await db.transaction('rw', db.packages, db.summaries, db.indexHashes, async () => {
+        check();
         const packageIds = await db.packages.where({community}).primaryKeys();
+        check();
         await db.packages.bulkDelete(packageIds);
+        check();
         await db.summaries.where({community}).delete();
+        check();
         await db.indexHashes.where({community}).delete();
+        check();
     });
 }
 
-export async function upsertPackageListChunk(community: string, packageChunk: any[]) {
+export async function upsertPackageListChunk(community: string, packageChunk: any[], check: CatalogWriteGuard = noCatalogGuard) {
+    check();
     const newPackages: DexiePackage[] = packageChunk.map((pkg) => Object.assign(pkg, {community}));
     const newSummaries: DexieSummary[] = packageChunk.map((pkg) => toSummary(community, pkg));
     await db.transaction('rw', db.packages, db.summaries, async () => {
+        check();
         await db.packages.bulkPut(newPackages);
+        check();
         await db.summaries.bulkPut(newSummaries);
+        check();
     });
 }
 
@@ -214,20 +240,32 @@ export async function upsertPackageListChunk(community: string, packageChunk: an
  * before this call, so an HTTP or validation failure never prunes cached mods.
  * Existing keys, profile manifests and artifact cache paths are unchanged.
  */
-export async function replacePackageList(community: string, packages: any[], hash: string) {
+export async function replacePackageList(community: string, packages: any[], hash: string, check: CatalogWriteGuard = noCatalogGuard) {
+    check();
     const newPackages: DexiePackage[] = packages.map(pkg => ({...pkg, community}));
     const summaries = packages.map(pkg => toSummary(community, pkg));
     await db.transaction('rw', db.packages, db.summaries, db.indexHashes, async () => {
+        check();
         await db.packages.where({community}).delete();
+        check();
         await db.summaries.where({community}).delete();
+        check();
         await db.packages.bulkPut(newPackages);
+        check();
         await db.summaries.bulkPut(summaries);
+        check();
         await db.indexHashes.put({community, hash, date_updated: new Date()});
+        check();
     });
 }
 
-export async function setLatestPackageListIndex(community: string, hash: string) {
-    await db.indexHashes.put({community, hash, date_updated: new Date()});
+export async function setLatestPackageListIndex(community: string, hash: string, check: CatalogWriteGuard = noCatalogGuard) {
+    check();
+    await db.transaction('rw', db.indexHashes, async () => {
+        check();
+        await db.indexHashes.put({community, hash, date_updated: new Date()});
+        check();
+    });
 }
 
 async function getPackageFromDatabase(community: string, packageName: string) {

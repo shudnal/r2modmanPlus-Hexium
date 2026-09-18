@@ -44,15 +44,24 @@ Updating the catalog never installs or downgrades a mod on its own.
 There are no separate persisted source snapshots and no cross-repository retry
 or failover policy. An unavailable source or malformed response fails the refresh
 and retains the previous combined catalog. Source progress uses the existing UI.
-Switching away from the captured game prevents publishing the result into the
-new game's catalog or mod list.
+Each startup, refresh or cache reset owns a monotonically increasing generation
+and captures its community and index URL. Starting another operation, selecting
+a game (including a reused Game instance), or resetting local state invalidates
+previous work. All continuations, progress/error updates and finalization check
+that generation. Database write guards also run inside transactions, so a queued
+or interrupted obsolete write is aborted instead of replacing a newer catalog.
+Stale startup work returns false and cannot advance the splash screen. Background
+profile reads are likewise checked before publishing their installed-mod list.
 
-The adapter follows the Hexium OpenAPI supplied with the implementation request.
-Live Hexium responses and downloads still need verification in the local manager.
-The schema does not require `file_size`; absent or invalid sizes normalize to zero
-(unknown). Download-size totals are therefore estimates and can exclude packages
-whose size is not reported. Download completion is determined by the existing
-transfer/extraction status, not by that estimate.
+The adapter follows the supplied Hexium OpenAPI with one observed correction:
+the repository owner checked the live V1 catalog and reported `file_size` present
+in all 3,405 versions with valid values, despite its omission from PackageListing
+in that schema. This is a user-reported API check, not an automated live test here.
+Active releases must provide a positive safe-integer byte count. Missing, zero or
+invalid sizes fail validation with the source, package and version in the error;
+they are never converted to zero or borrowed from the other repository. The
+existing byte-based downloader/progress path is unchanged. There is no
+unknown-size download mode, and already cached archives are still reused.
 
 ## Local build
 
@@ -61,15 +70,23 @@ is no public release pipeline for this change and no new version number.
 The `update-app` IPC handler is intentionally disabled: installing an automatic
 upstream update would remove the Hexium changes. Update this fork manually.
 
-Use the environment and dependency setup described in `BUILDING.md` and
-`DevEnvSetup.md`. Existing commands include:
+For Windows, use Node.js 22.23.1 x64 (pinned in `mise.toml`) and pnpm 11.8.0
+(pinned in `package.json`). Install Git and Node first, then run in PowerShell:
 
-```sh
-pnpm install --frozen-lockfile
-pnpm dev
-# Alternatively, build the local Windows application:
-pnpm build-win
+```powershell
+npm.cmd install --global pnpm@11.8.0
+git clone --branch feature/hexium-catalog --single-branch https://github.com/shudnal/r2modmanPlus-Hexium.git
+Set-Location .\r2modmanPlus-Hexium
+pnpm.cmd install --frozen-lockfile
+pnpm.cmd exec quasar prepare
+pnpm.cmd run build-win --publish=never
 ```
+
+Run each command only after the preceding command succeeds. Do not run
+`pnpm upgrade` or remove the lockfile as part of setting up this branch. The old
+upstream Python 2 instructions are not an additional prerequisite for this change.
+Windows installer and portable outputs are under `dist/electron/Packaged`.
+For development instead of packaging, use `pnpm.cmd run dev`.
 
 Back up existing profiles before trying the build. Do not run the upstream manager
 and this build against the same data directory concurrently. An upstream catalog
@@ -78,7 +95,9 @@ A restart or normal catalog refresh in this build loads both sources again.
 
 ## Verification
 
-The focused Vitest specs are in `test/vitest/tests/hexium`:
+The focused Vitest specs are in `test/vitest/tests/hexium`. They include size
+validation and controlled out-of-order startup/refresh/reset completions.
+Run after installing dependencies and preparing Quasar as shown above:
 
 ```sh
 pnpm exec vitest run test/vitest/tests/hexium
@@ -100,6 +119,9 @@ Check in the local application:
    manager and confirm the merged history and selected package URLs persist.
 5. Open README, CHANGELOG and View online for a Hexium-only package and a TS-newer
    package. Confirm the existing launcher and profile contents remain unchanged.
+6. Start a refresh, switch games, and switch back while the earlier request is
+   pending. Old success/error/progress callbacks must not affect the newer run.
+   Repeat with a cold startup and with a cache reset in flight.
 
 No game assemblies or Valheim mods need to be rebuilt to validate this manager
 integration. The supplied API contract is not evidence of a successful live API
