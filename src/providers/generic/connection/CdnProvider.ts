@@ -3,6 +3,8 @@ import { getAxiosWithTimeouts } from '../../../utils/HttpUtils';
 import { addOrReplaceSearchParams, replaceHost } from '../../../utils/UrlUtils';
 import { CdnDefinition, getCdns } from '../../../providers/cdn/CdnHostList';
 
+import { isThunderstoreUrl } from '../../../utils/RepositoryUrls';
+
 const TEST_FILE = "healthz";
 
 const CONNECTION_ERROR = new R2Error(
@@ -57,13 +59,13 @@ export default class CdnProvider {
     }
 
     public static replaceCdnHost(url: string) {
-        return CdnProvider.preferredCdn
+        return CdnProvider.preferredCdn && isThunderstoreUrl(url)
             ? replaceHost(url, CdnProvider.preferredCdn)
             : url;
     }
 
     public static addCdnQueryParameter(url: string) {
-        return CdnProvider.preferredCdn
+        return CdnProvider.preferredCdn && isThunderstoreUrl(url)
             ? addOrReplaceSearchParams(url, `cdn=${CdnProvider.preferredCdn.host}`)
             : url;
     }

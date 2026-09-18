@@ -1,4 +1,5 @@
 import ThunderstoreVersion from './ThunderstoreVersion';
+import { normalizeDonationUrl } from '../utils/DonationUrl';
 
 export default class ThunderstoreMod extends ThunderstoreVersion {
     private rating: number = 0;
@@ -166,7 +167,8 @@ export default class ThunderstoreMod extends ThunderstoreVersion {
         return this.donationLink;
     }
 
-    public setDonationLink(url: string | null | undefined) {
-        this.donationLink = url || null;
+    public setDonationLink(url: unknown) {
+        // Cached packages and summaries may predate catalog URL validation.
+        this.donationLink = normalizeDonationUrl(url);
     }
 }

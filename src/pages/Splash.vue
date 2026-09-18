@@ -201,8 +201,8 @@ onMounted(async () => {
         requestName: 'UpdateCheck',
         value: 100
     } as UpdateRequestItemBody);
-    await store.dispatch('splash/getThunderstoreMods');
-    moveToNextScreen();
+    const completed = await store.dispatch('splash/getThunderstoreMods');
+    if (completed) moveToNextScreen();
 })
 </script>
 
