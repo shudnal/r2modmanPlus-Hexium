@@ -63,6 +63,21 @@ they are never converted to zero or borrowed from the other repository. The
 existing byte-based downloader/progress path is unchanged. There is no
 unknown-size download mode, and already cached archives are still reused.
 
+## Donation links
+
+Donation links are optional, publisher-controlled metadata, not trusted OS
+commands. `DonationUrl.normalizeDonationUrl` accepts only absolute HTTPS URLs
+with a hostname and no credentials. Other schemes, relative/malformed URLs,
+control characters and backslashes become null. Valid links are canonicalized.
+An invalid donation link hides Donate without rejecting the package or changing
+which release wins; it is never replaced with the other listing's donation link.
+
+The same policy runs in the catalog normalizer and `ThunderstoreMod` setter.
+Both full-package and summary reads therefore protect previously cached links
+before any Donate control receives them. Clearing the cache is unnecessary.
+This is a donation-field restriction, not a general Electron IPC hardening pass;
+Steam validation and Epic game-launch protocols remain unchanged.
+
 ## Local build
 
 Keep the upstream package name, application identity and profile format. There
@@ -96,7 +111,8 @@ A restart or normal catalog refresh in this build loads both sources again.
 ## Verification
 
 The focused Vitest specs are in `test/vitest/tests/hexium`. They include size
-validation and controlled out-of-order startup/refresh/reset completions.
+validation, donation URL filtering (including legacy cache reads), and controlled
+out-of-order startup/refresh/reset completions.
 Run after installing dependencies and preparing Quasar as shown above:
 
 ```sh
@@ -122,6 +138,9 @@ Check in the local application:
 6. Start a refresh, switch games, and switch back while the earlier request is
    pending. Old success/error/progress callbacks must not affect the newer run.
    Repeat with a cold startup and with a cache reset in flight.
+7. Confirm valid HTTPS donation links still appear. Using test fixtures rather
+   than live malicious links, confirm a non-web donation URL is removed from
+   both full-package and summary reads, including a pre-fix cache entry.
 
 No game assemblies or Valheim mods need to be rebuilt to validate this manager
 integration. The supplied API contract is not evidence of a successful live API

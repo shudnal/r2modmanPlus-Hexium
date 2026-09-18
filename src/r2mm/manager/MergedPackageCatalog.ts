@@ -1,3 +1,5 @@
+import { normalizeDonationUrl } from '../../utils/DonationUrl';
+
 /**
  * One logical catalog and one artifact cache. A release is identified by its
  * full package name and version, not by the repository or archive bytes.
@@ -25,6 +27,7 @@ export interface CatalogPackage extends JsonObject {
     owner: string;
     full_name: string;
     package_url: string;
+    donation_link: string | null;
     categories: string[];
     is_deprecated: boolean;
     has_nsfw_content: boolean;
@@ -145,7 +148,7 @@ function normalizePackage(value: unknown, source: CatalogSource): CatalogPackage
         is_pinned: raw.is_pinned === true,
         is_deprecated: raw.is_deprecated === true,
         has_nsfw_content: raw.has_nsfw_content === true,
-        donation_link: typeof raw.donation_link === 'string' ? raw.donation_link : null,
+        donation_link: normalizeDonationUrl(raw.donation_link),
         date_created: typeof raw.date_created === 'string' ? raw.date_created : versions[0]!.date_created,
         date_updated: typeof raw.date_updated === 'string' ? raw.date_updated : versions[0]!.date_created,
         versions,
